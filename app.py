@@ -19,7 +19,13 @@ from datetime import timedelta
 
 import customtkinter as ctk
 
-from downloader import VideoDownloader, DownloadError, QUALITY_MAP, AUDIO_FORMATS
+from downloader import (
+    VideoDownloader,
+    DownloadError,
+    QUALITY_MAP,
+    AUDIO_FORMATS,
+    HAS_FFMPEG,
+)
 
 
 # ── Theme ────────────────────────────────────────────────────────────────────
@@ -55,8 +61,12 @@ class App(ctk.CTk):
 
         self._download_thread: threading.Thread | None = None
         self._downloader: VideoDownloader | None = None
+        self.quality_options = list(QUALITY_MAP.keys())
+        if not HAS_FFMPEG:
+            self.quality_options = [q for q in self.quality_options if q != "4K (2160p)"]
 
         self._build_ui()
+        self.after(150, self._log_ffmpeg_hint)
 
     # ══════════════════════════════════════════════════════════════════════
     #  UI Construction
@@ -134,7 +144,7 @@ class App(ctk.CTk):
         self.quality_menu = ctk.CTkOptionMenu(
             left,
             variable=self.quality_var,
-            values=list(QUALITY_MAP.keys()),
+            values=self.quality_options,
             width=200,
             fg_color="#12121f",
             button_color=ACCENT,
@@ -289,6 +299,13 @@ class App(ctk.CTk):
         )
         self.log_textbox.pack(fill="both", expand=True)
         self.log_textbox.configure(state="disabled")
+
+    def _log_ffmpeg_hint(self):
+        if not HAS_FFMPEG:
+            self._log(
+                "⚠  ffmpeg not detected. 4K option hidden and high resolutions may be limited.\n"
+                "   Install: winget install --id Gyan.FFmpeg -e"
+            )
 
     # ══════════════════════════════════════════════════════════════════════
     #  Event handlers

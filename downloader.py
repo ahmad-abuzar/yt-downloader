@@ -105,12 +105,9 @@ class VideoDownloader:
         except Exception as exc:
             raise DownloadError(f"Failed to fetch info: {exc}") from exc
 
-        # Determine the best available resolution
-        available_heights = set()
-        for fmt in info.get("formats", []):
-            h = fmt.get("height")
-            if h:
-                available_heights.add(h)
+        # Reflect what this app can really download in the current environment.
+        # Without ffmpeg we are limited to pre-muxed streams (video+audio in one).
+        available_heights = self._collect_available_heights(info.get("formats", []))
 
         available_qualities = []
         for label, _ in QUALITY_MAP.items():
@@ -140,6 +137,14 @@ class VideoDownloader:
         """
         self._cancel_flag = False
         format_spec = QUALITY_MAP.get(quality, QUALITY_MAP["Best"])
+
+        if quality == "4K (2160p)" and not HAS_FFMPEG:
+            raise DownloadError(
+                "❌ 4K download requires ffmpeg because YouTube usually provides 4K as "
+                "separate video/audio streams.\n"
+                "   Install it and restart the app:\n"
+                "   winget install --id Gyan.FFmpeg -e"
+            )
 
         if not HAS_FFMPEG:
             self._log("⚠  ffmpeg not found – using pre-muxed stream (quality may be limited).")
@@ -267,6 +272,26 @@ class VideoDownloader:
 
         self._log(f"✅  Saved → {filepath}")
         return filepath
+
+    @staticmethod
+    def _collect_available_heights(formats: list[dict]) -> set[int]:
+        """Return heights that are realistically downloadable in this environment."""
+        heights: set[int] = set()
+        for fmt in formats:
+            height = fmt.get("height")
+            if not height:
+                continue
+
+            has_video = fmt.get("vcodec") not in (None, "none")
+            has_audio = fmt.get("acodec") not in (None, "none")
+
+            # With ffmpeg we can merge separate streams, so any video stream counts.
+            if HAS_FFMPEG and has_video:
+                heights.add(height)
+            # Without ffmpeg only pre-muxed (video+audio) streams are downloadable.
+            elif not HAS_FFMPEG and has_video and has_audio:
+                heights.add(height)
+        return heights
 
     def _progress_hook(self, d: dict):
         """Called by yt-dlp with download progress data."""
