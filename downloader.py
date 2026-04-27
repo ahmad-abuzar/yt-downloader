@@ -12,6 +12,8 @@ Provides the VideoDownloader class with methods for:
 import os
 import re
 import shutil
+import subprocess
+from pathlib import Path
 import yt_dlp
 
 
@@ -24,16 +26,18 @@ HAS_FFMPEG = shutil.which("ffmpeg") is not None
 # single streams that don't require merging.
 if HAS_FFMPEG:
     QUALITY_MAP = {
-        "4K (2160p)":  "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-        "1080p":       "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-        "720p":        "bestvideo[height<=720]+bestaudio/best[height<=720]",
-        "480p":        "bestvideo[height<=480]+bestaudio/best[height<=480]",
-        "360p":        "bestvideo[height<=360]+bestaudio/best[height<=360]",
-        "Best":        "bestvideo+bestaudio/best",
+        "8K (4320p)":  "bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=4320]+bestaudio/best[height<=4320]",
+        "4K (2160p)":  "bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]",
+        "1080p":       "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+        "720p":        "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]",
+        "480p":        "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]",
+        "360p":        "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]",
+        "Best":        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
     }
 else:
     # Single pre-muxed streams – no ffmpeg needed
     QUALITY_MAP = {
+        "8K (4320p)":  "best[height<=4320]",
         "4K (2160p)":  "best[height<=2160]",
         "1080p":       "best[height<=1080]",
         "720p":        "best[height<=720]",
@@ -43,6 +47,61 @@ else:
     }
 
 AUDIO_FORMATS = ("mp3", "wav")
+CONTAINER_OPTIONS = ("Original", "mp4", "mkv")
+CODEC_OPTIONS = (
+    "Auto",
+    "H.264 (AVC)",
+    "H.265 (HEVC)",
+    "AV1",
+    "VP9",
+)
+FRAME_RATE_OPTIONS = ("Auto", "24", "30", "48", "60")
+
+CODEC_FFMPEG_MAP = {
+    "H.264 (AVC)": "libx264",
+    "H.265 (HEVC)": "libx265",
+    "AV1": "libaom-av1",
+    "VP9": "libvpx-vp9",
+}
+
+PRESET_CONFIGS = {
+    "MP4 (Universal)": {
+        "quality": "4K (2160p)",
+        "container": "mp4",
+        "codec": "H.264 (AVC)",
+        "frame_rate": "30",
+    },
+    "MKV (High Quality)": {
+        "quality": "8K (4320p)",
+        "container": "mkv",
+        "codec": "H.265 (HEVC)",
+        "frame_rate": "60",
+    },
+    "Android (Mobile Optimized)": {
+        "quality": "720p",
+        "container": "mp4",
+        "codec": "H.264 (AVC)",
+        "frame_rate": "30",
+    },
+    "Android Car LCD (Max Compatibility)": {
+        "quality": "720p",
+        "container": "mp4",
+        "codec": "H.264 (AVC)",
+        "frame_rate": "30",
+    },
+    "Linux (Open Codec)": {
+        "quality": "4K (2160p)",
+        "container": "mkv",
+        "codec": "VP9",
+        "frame_rate": "60",
+    },
+    "Windows (Playback Optimized)": {
+        "quality": "4K (2160p)",
+        "container": "mp4",
+        "codec": "H.265 (HEVC)",
+        "frame_rate": "60",
+    },
+}
 
 
 def _sanitize_filename(name: str) -> str:
@@ -128,7 +187,15 @@ class VideoDownloader:
             "available_qualities": available_qualities or ["Best"],
         }
 
-    def download_video(self, url: str, quality: str = "Best") -> str:
+    def download_video(
+        self,
+        url: str,
+        quality: str = "Best",
+        codec: str = "Auto",
+        frame_rate: str = "Auto",
+        container: str = "Original",
+        preset_name: str | None = None,
+    ) -> str:
         """
         Download a video at the given quality preset.
 
@@ -136,12 +203,47 @@ class VideoDownloader:
         Raises DownloadError on failure.
         """
         self._cancel_flag = False
-        format_spec = QUALITY_MAP.get(quality, QUALITY_MAP["Best"])
 
-        if quality == "4K (2160p)" and not HAS_FFMPEG:
+        config = {
+            "quality": quality,
+            "codec": codec,
+            "frame_rate": frame_rate,
+            "container": container,
+            "preset_name": preset_name,
+        }
+        if preset_name:
+            preset = PRESET_CONFIGS.get(preset_name)
+            if not preset:
+                raise DownloadError(
+                    f"Unknown preset '{preset_name}'. Available: {list(PRESET_CONFIGS.keys())}"
+                )
+            config.update(preset)
+            self._log(f"🎯 Preset selected: {preset_name} -> {preset}")
+
+        self._validate_video_settings(
+            quality=config["quality"],
+            codec=config["codec"],
+            frame_rate=config["frame_rate"],
+            container=config["container"],
+        )
+
+        format_spec = QUALITY_MAP.get(config["quality"], QUALITY_MAP["Best"])
+
+        if config["quality"] in ("4K (2160p)", "8K (4320p)") and not HAS_FFMPEG:
             raise DownloadError(
-                "❌ 4K download requires ffmpeg because YouTube usually provides 4K as "
-                "separate video/audio streams.\n"
+                "❌ 4K/8K download requires ffmpeg because YouTube usually provides high "
+                "resolutions as separate video/audio streams.\n"
+                "   Install it and restart the app:\n"
+                "   winget install --id Gyan.FFmpeg -e"
+            )
+
+        if not HAS_FFMPEG and (
+            config["codec"] != "Auto"
+            or config["frame_rate"] != "Auto"
+            or config["container"] != "Original"
+        ):
+            raise DownloadError(
+                "❌ Codec/frame-rate/container customization requires ffmpeg.\n"
                 "   Install it and restart the app:\n"
                 "   winget install --id Gyan.FFmpeg -e"
             )
@@ -160,7 +262,8 @@ class VideoDownloader:
         if HAS_FFMPEG:
             opts["merge_output_format"] = "mp4"
 
-        return self._run_download(url, opts, f"video ({quality})")
+        filepath = self._run_download(url, opts, f"video ({config['quality']})")
+        return self._smart_export(filepath, config)
 
     def extract_audio(self, url: str, audio_format: str = "mp3") -> str:
         """
@@ -204,6 +307,10 @@ class VideoDownloader:
         quality: str = "Best",
         audio_only: bool = False,
         audio_format: str = "mp3",
+        codec: str = "Auto",
+        frame_rate: str = "Auto",
+        container: str = "Original",
+        preset_name: str | None = None,
     ) -> list[dict]:
         """
         Download multiple URLs sequentially.
@@ -220,7 +327,14 @@ class VideoDownloader:
                 if audio_only:
                     path = self.extract_audio(url, audio_format)
                 else:
-                    path = self.download_video(url, quality)
+                    path = self.download_video(
+                        url,
+                        quality=quality,
+                        codec=codec,
+                        frame_rate=frame_rate,
+                        container=container,
+                        preset_name=preset_name,
+                    )
                 results.append({"url": url, "success": True, "path_or_error": path})
             except DownloadError as exc:
                 results.append({"url": url, "success": False, "path_or_error": str(exc)})
@@ -272,6 +386,111 @@ class VideoDownloader:
 
         self._log(f"✅  Saved → {filepath}")
         return filepath
+
+    def _validate_video_settings(
+        self,
+        quality: str,
+        codec: str,
+        frame_rate: str,
+        container: str,
+    ):
+        if quality not in QUALITY_MAP:
+            raise DownloadError(f"Unsupported quality '{quality}'.")
+        if codec not in CODEC_OPTIONS:
+            raise DownloadError(f"Unsupported codec '{codec}'.")
+        if frame_rate not in FRAME_RATE_OPTIONS:
+            raise DownloadError(f"Unsupported frame rate '{frame_rate}'.")
+        if container not in CONTAINER_OPTIONS:
+            raise DownloadError(f"Unsupported container '{container}'.")
+
+    def _smart_export(self, filepath: str, config: dict) -> str:
+        """Apply codec/frame-rate/container settings after download when needed."""
+        codec = config["codec"]
+        frame_rate = config["frame_rate"]
+        container = config["container"]
+        preset_name = config.get("preset_name")
+
+        requires_processing = (
+            codec != "Auto" or frame_rate != "Auto" or container != "Original"
+        )
+        if not requires_processing:
+            return filepath
+
+        if not HAS_FFMPEG:
+            raise DownloadError("ffmpeg is required for export processing.")
+
+        src = Path(filepath)
+        target_ext = src.suffix if container == "Original" else f".{container}"
+        dst = src.with_name(f"{src.stem} [export]{target_ext}")
+
+        ffmpeg_codec = CODEC_FFMPEG_MAP.get(codec, "libx264")
+        if codec == "Auto":
+            ffmpeg_codec = "libx264"
+
+        # Keep platform-friendly audio defaults per container.
+        audio_codec = "aac" if target_ext.lower() == ".mp4" else "libopus"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            ffmpeg_codec,
+            "-c:a",
+            audio_codec,
+        ]
+
+        if target_ext.lower() == ".mp4":
+            # Use legacy-safe H.264/AAC settings for older Android/car LCD decoders.
+            cmd.extend([
+                "-movflags", "+faststart",
+                "-pix_fmt", "yuv420p",
+                "-c:v", "libx264",
+                "-profile:v", "baseline",
+                "-level", "3.1",
+                "-vf", "scale=1280:-2:force_original_aspect_ratio=decrease",
+                "-fps_mode", "cfr",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-ac", "2",
+                "-ar", "44100",
+                "-tag:v", "avc1",
+            ])
+            if preset_name != "Android Car LCD (Max Compatibility)":
+                self._log("ℹ  MP4 compatibility mode enabled (Android/car safe).")
+
+        if target_ext.lower() == ".mp4":
+            cmd.extend(["-r", "30"])
+        elif frame_rate != "Auto":
+            cmd.extend(["-r", frame_rate])
+        cmd.append(str(dst))
+
+        self._log(
+            f"🎬 Exporting with codec={codec}, fps={frame_rate}, container={target_ext.lstrip('.')} ..."
+        )
+        try:
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            err = (exc.stderr or exc.stdout or str(exc)).strip()
+            raise DownloadError(f"Export failed: {err}") from exc
+
+        try:
+            src.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        self._log(f"✅  Exported → {dst}")
+        return str(dst)
 
     @staticmethod
     def _collect_available_heights(formats: list[dict]) -> set[int]:

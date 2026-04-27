@@ -30,7 +30,16 @@ if sys.platform == "win32":
             sys.stderr.buffer, encoding="utf-8", errors="replace"
         )
 
-from downloader import VideoDownloader, DownloadError, QUALITY_MAP, AUDIO_FORMATS
+from downloader import (
+    VideoDownloader,
+    DownloadError,
+    QUALITY_MAP,
+    AUDIO_FORMATS,
+    CODEC_OPTIONS,
+    FRAME_RATE_OPTIONS,
+    CONTAINER_OPTIONS,
+    PRESET_CONFIGS,
+)
 
 
 def _cli_progress(percent: float, speed: str, eta: str):
@@ -72,11 +81,41 @@ def run_cli(args: argparse.Namespace):
             sys.exit(1)
         results = dl.batch_download(urls, audio_only=True, audio_format=fmt)
     else:
+        if args.preset and args.preset not in PRESET_CONFIGS:
+            print(f"❌  Invalid preset '{args.preset}'. Choose from: {list(PRESET_CONFIGS.keys())}")
+            sys.exit(1)
+
         quality = args.quality
         if quality not in QUALITY_MAP:
             print(f"❌  Invalid quality '{quality}'. Choose from: {list(QUALITY_MAP.keys())}")
             sys.exit(1)
-        results = dl.batch_download(urls, quality=quality)
+
+        if args.codec not in CODEC_OPTIONS:
+            print(f"❌  Invalid codec '{args.codec}'. Choose from: {list(CODEC_OPTIONS)}")
+            sys.exit(1)
+
+        if args.frame_rate not in FRAME_RATE_OPTIONS:
+            print(
+                f"❌  Invalid frame rate '{args.frame_rate}'. "
+                f"Choose from: {list(FRAME_RATE_OPTIONS)}"
+            )
+            sys.exit(1)
+
+        if args.container not in CONTAINER_OPTIONS:
+            print(
+                f"❌  Invalid container '{args.container}'. "
+                f"Choose from: {list(CONTAINER_OPTIONS)}"
+            )
+            sys.exit(1)
+
+        results = dl.batch_download(
+            urls,
+            quality=quality,
+            codec=args.codec,
+            frame_rate=args.frame_rate,
+            container=args.container,
+            preset_name=args.preset,
+        )
 
     # Summary
     ok   = sum(1 for r in results if r["success"])
@@ -117,6 +156,25 @@ Examples:
     parser.add_argument(
         "--quality", default="Best",
         help=f"Video quality preset. Choices: {list(QUALITY_MAP.keys())}. Default: Best.",
+    )
+    parser.add_argument(
+        "--preset", default=None,
+        help=(
+            f"Smart export preset name. Choices: {list(PRESET_CONFIGS.keys())}. "
+            "When set, preset overrides quality/codec/frame-rate/container."
+        ),
+    )
+    parser.add_argument(
+        "--codec", default="Auto",
+        help=f"Video codec. Choices: {list(CODEC_OPTIONS)}. Default: Auto.",
+    )
+    parser.add_argument(
+        "--frame-rate", default="Auto", dest="frame_rate",
+        help=f"Output frame rate. Choices: {list(FRAME_RATE_OPTIONS)}. Default: Auto.",
+    )
+    parser.add_argument(
+        "--container", default="Original",
+        help=f"Output container. Choices: {list(CONTAINER_OPTIONS)}. Default: Original.",
     )
     parser.add_argument(
         "--audio", action="store_true",

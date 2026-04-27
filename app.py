@@ -24,6 +24,10 @@ from downloader import (
     DownloadError,
     QUALITY_MAP,
     AUDIO_FORMATS,
+    CODEC_OPTIONS,
+    FRAME_RATE_OPTIONS,
+    CONTAINER_OPTIONS,
+    PRESET_CONFIGS,
     HAS_FFMPEG,
 )
 
@@ -63,7 +67,9 @@ class App(ctk.CTk):
         self._downloader: VideoDownloader | None = None
         self.quality_options = list(QUALITY_MAP.keys())
         if not HAS_FFMPEG:
-            self.quality_options = [q for q in self.quality_options if q != "4K (2160p)"]
+            self.quality_options = [
+                q for q in self.quality_options if q not in {"4K (2160p)", "8K (4320p)"}
+            ]
 
         self._build_ui()
         self.after(150, self._log_ffmpeg_hint)
@@ -127,13 +133,37 @@ class App(ctk.CTk):
         )
         self.url_textbox.pack(fill="x")
 
-    # ── Options (Quality / Audio) ────────────────────────────────────────
+    # ── Options (Presets / Quality / Codec / FPS / Audio) ─────────────────
     def _build_options_section(self):
         card = self._card(self.main)
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(
+            top,
+            text="🎯  Export Preset",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left")
+
+        self.preset_var = ctk.StringVar(value="Custom (Manual)")
+        self.preset_menu = ctk.CTkOptionMenu(
+            top,
+            variable=self.preset_var,
+            values=["Custom (Manual)", *PRESET_CONFIGS.keys()],
+            width=280,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+            command=self._on_preset_change,
+        )
+        self.preset_menu.pack(side="left", padx=(10, 0))
+
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x")
 
-        # Quality
+        # Quality + container
         left = ctk.CTkFrame(row, fg_color="transparent")
         left.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
@@ -153,9 +183,60 @@ class App(ctk.CTk):
         )
         self.quality_menu.pack(anchor="w")
 
-        # Audio toggle + format
+        ctk.CTkLabel(
+            left, text="📦  Container",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(8, 4))
+        self.container_var = ctk.StringVar(value="Original")
+        self.container_menu = ctk.CTkOptionMenu(
+            left,
+            variable=self.container_var,
+            values=list(CONTAINER_OPTIONS),
+            width=200,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.container_menu.pack(anchor="w")
+
+        # Codec + fps + audio
         right = ctk.CTkFrame(row, fg_color="transparent")
         right.pack(side="right", padx=(20, 0))
+
+        ctk.CTkLabel(
+            right, text="🎞  Video Codec",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(0, 4))
+        self.codec_var = ctk.StringVar(value="Auto")
+        self.codec_menu = ctk.CTkOptionMenu(
+            right,
+            variable=self.codec_var,
+            values=list(CODEC_OPTIONS),
+            width=220,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.codec_menu.pack(anchor="w")
+
+        ctk.CTkLabel(
+            right, text="⏱  Frame Rate",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(8, 4))
+        self.frame_rate_var = ctk.StringVar(value="Auto")
+        self.frame_rate_menu = ctk.CTkOptionMenu(
+            right,
+            variable=self.frame_rate_var,
+            values=list(FRAME_RATE_OPTIONS),
+            width=220,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.frame_rate_menu.pack(anchor="w")
 
         self.audio_only_var = ctk.BooleanVar(value=False)
         self.audio_check = ctk.CTkCheckBox(
@@ -169,7 +250,7 @@ class App(ctk.CTk):
             corner_radius=6,
             command=self._on_audio_toggle,
         )
-        self.audio_check.pack(anchor="w", pady=(0, 4))
+        self.audio_check.pack(anchor="w", pady=(10, 4))
 
         self.audio_format_var = ctk.StringVar(value="mp3")
         self.audio_format_menu = ctk.CTkOptionMenu(
@@ -184,6 +265,8 @@ class App(ctk.CTk):
             state="disabled",
         )
         self.audio_format_menu.pack(anchor="w")
+
+        self._sync_video_controls_state()
 
     # ── Output folder ────────────────────────────────────────────────────
     def _build_output_section(self):
@@ -303,7 +386,7 @@ class App(ctk.CTk):
     def _log_ffmpeg_hint(self):
         if not HAS_FFMPEG:
             self._log(
-                "⚠  ffmpeg not detected. 4K option hidden and high resolutions may be limited.\n"
+                "⚠  ffmpeg not detected. 4K/8K and codec/fps export controls are limited.\n"
                 "   Install: winget install --id Gyan.FFmpeg -e"
             )
 
@@ -312,12 +395,43 @@ class App(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════════
 
     def _on_audio_toggle(self):
-        if self.audio_only_var.get():
-            self.audio_format_menu.configure(state="normal")
-            self.quality_menu.configure(state="disabled")
+        self._sync_video_controls_state()
+
+    def _on_preset_change(self, selected: str):
+        if selected == "Custom (Manual)":
+            self._log("🛠  Manual export mode enabled.")
+            self._sync_video_controls_state()
+            return
+
+        preset = PRESET_CONFIGS.get(selected)
+        if not preset:
+            return
+
+        if preset["quality"] in self.quality_options:
+            self.quality_var.set(preset["quality"])
         else:
-            self.audio_format_menu.configure(state="disabled")
-            self.quality_menu.configure(state="normal")
+            self.quality_var.set("Best")
+        self.codec_var.set(preset["codec"])
+        self.frame_rate_var.set(preset["frame_rate"])
+        self.container_var.set(preset["container"])
+        self._log(
+            f"🎯 Preset applied: {selected} -> quality={self.quality_var.get()}, "
+            f"codec={self.codec_var.get()}, fps={self.frame_rate_var.get()}, "
+            f"container={self.container_var.get()}"
+        )
+        self._sync_video_controls_state()
+
+    def _sync_video_controls_state(self):
+        audio_only = self.audio_only_var.get()
+        preset_selected = self.preset_var.get() != "Custom (Manual)"
+
+        self.audio_format_menu.configure(state="normal" if audio_only else "disabled")
+
+        video_state = "disabled" if audio_only or preset_selected else "normal"
+        self.quality_menu.configure(state=video_state)
+        self.codec_menu.configure(state=video_state)
+        self.frame_rate_menu.configure(state=video_state)
+        self.container_menu.configure(state=video_state)
 
     def _browse_folder(self):
         folder = ctk.filedialog.askdirectory()
@@ -380,12 +494,21 @@ class App(ctk.CTk):
         audio_only = self.audio_only_var.get()
         audio_fmt  = self.audio_format_var.get()
         quality    = self.quality_var.get()
+        codec      = self.codec_var.get()
+        frame_rate = self.frame_rate_var.get()
+        container  = self.container_var.get()
+        preset     = self.preset_var.get()
+        preset_name = None if preset == "Custom (Manual)" else preset
 
         results = self._downloader.batch_download(
             urls,
             quality=quality,
             audio_only=audio_only,
             audio_format=audio_fmt,
+            codec=codec,
+            frame_rate=frame_rate,
+            container=container,
+            preset_name=preset_name,
         )
 
         # Summary

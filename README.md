@@ -10,9 +10,12 @@ A feature-rich YouTube video downloader with a **modern dark-themed GUI** and **
 
 | Feature | Description |
 |---------|-------------|
-| 📹 Video Download | Up to **4K (2160p)** resolution |
+| 📹 Video Download | Up to **8K (4320p)** resolution |
 | 🎵 Audio Extraction | Save as **MP3** or **WAV** |
-| 📊 Quality Selector | 4K / 1080p / 720p / 480p / 360p / Best |
+| 📊 Quality Selector | 8K / 4K / 1080p / 720p / 480p / 360p / Best |
+| 🎞️ Export Controls | Select **codec**, **frame rate**, and **container** independently |
+| 🎯 Smart Presets | One-click presets for **MP4**, **MKV**, **Android**, **Linux**, **Windows** |
+| 🚘 MP4 Compatibility Mode | All MP4 exports use Android-car-safe H.264/AAC defaults |
 | 📦 Batch Download | Paste multiple URLs, one per line |
 | 📈 Progress Tracking | Real-time progress bar, speed & ETA |
 | ⛔ Cancel Support | Stop downloads mid-stream |
@@ -68,6 +71,15 @@ python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID"
 # Download at 1080p
 python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID" --quality "1080p"
 
+# Smart preset export (auto quality/codec/fps/container)
+python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID" --preset "Android (Mobile Optimized)"
+
+# Android car LCD safe export (maximum compatibility)
+python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID" --preset "Android Car LCD (Max Compatibility)"
+
+# Manual export settings
+python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID" --quality "8K (4320p)" --codec "H.265 (HEVC)" --frame-rate 60 --container mkv
+
 # Extract audio as MP3
 python main.py --cli --url "https://www.youtube.com/watch?v=VIDEO_ID" --audio
 
@@ -88,6 +100,10 @@ python main.py --cli --url "URL" --output "./my_videos"
 | `--cli` | Use command-line mode | GUI |
 | `--url URL` | YouTube URL (repeatable) | — |
 | `--quality Q` | Quality preset | `Best` |
+| `--preset NAME` | Smart preset (overrides quality/codec/fps/container) | `None` |
+| `--codec NAME` | Video codec (`Auto`, H.264, H.265, AV1, VP9) | `Auto` |
+| `--frame-rate FPS` | Frame rate (`Auto`, 24, 30, 48, 60) | `Auto` |
+| `--container C` | Output container (`Original`, `mp4`, `mkv`) | `Original` |
 | `--audio` | Extract audio only | `False` |
 | `--audio-format F` | `mp3` or `wav` | `mp3` |
 | `--output DIR` | Output directory | `~/Downloads/YT_Downloads` |
@@ -112,6 +128,8 @@ video_dlownloader/
 | Error | Solution |
 |-------|----------|
 | `ffmpeg not found` | Install ffmpeg and add it to your PATH |
+| `4K/8K or codec export failed` | Install ffmpeg (`winget install --id Gyan.FFmpeg -e`) |
+| `Video not playing on Android car LCD` | Use preset `Android Car LCD (Max Compatibility)` |
 | `Private video` | The video requires sign-in — not supported |
 | `Age-restricted` | Cannot download without authentication |
 | `Network error` | Check your internet connection |
