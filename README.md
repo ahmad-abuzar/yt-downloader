@@ -14,6 +14,7 @@ A feature-rich YouTube video downloader with a **modern dark-themed GUI** and **
 | 🎵 Audio Extraction | Save as **MP3** or **WAV** |
 | 📊 Quality Selector | 8K / 4K / 1080p / 720p / 480p / 360p / Best |
 | 🎞️ Export Controls | Select **codec**, **frame rate**, and **container** independently |
+| 🎬 Video Converter | Convert local files to **720p / 1080p / 4K** inside the app |
 | 🎯 Smart Presets | One-click presets for **MP4**, **MKV**, **Android**, **Linux**, **Windows** |
 | 🚘 MP4 Compatibility Mode | All MP4 exports use Android-car-safe H.264/AAC defaults |
 | 📦 Batch Download | Paste multiple URLs, one per line |
@@ -61,6 +62,7 @@ This launches the graphical interface where you can:
 2. Choose video quality or audio-only mode
 3. Pick an output folder
 4. Click **Fetch Info** to preview, then **Download**
+5. Use **Video Converter** to convert an existing local file between 720p, 1080p, and 4K
 
 ### CLI Mode
 
@@ -107,6 +109,20 @@ python main.py --cli --url "URL" --output "./my_videos"
 | `--audio` | Extract audio only | `False` |
 | `--audio-format F` | `mp3` or `wav` | `mp3` |
 | `--output DIR` | Output directory | `~/Downloads/YT_Downloads` |
+
+---
+
+## 🎬 In-App Video Converter
+
+The GUI also includes a local file converter powered by ffmpeg.
+
+You can:
+- Select a video file from disk
+- Choose a target resolution: `720p`, `1080p`, or `4K (2160p)`
+- Pick a container and codec
+- Keep or remove the source file after conversion
+
+Conversion works for both upscaling and downscaling, so `1080p -> 4K` and `4K -> 1080p` are both supported.
 
 ---
 

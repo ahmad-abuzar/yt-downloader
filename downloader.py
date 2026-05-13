@@ -56,6 +56,13 @@ CODEC_OPTIONS = (
     "VP9",
 )
 FRAME_RATE_OPTIONS = ("Auto", "24", "30", "48", "60")
+CONVERSION_RESOLUTION_OPTIONS = ("720p", "1080p", "4K (2160p)")
+
+CONVERSION_RESOLUTION_MAP = {
+    "720p": 720,
+    "1080p": 1080,
+    "4K (2160p)": 2160,
+}
 
 CODEC_FFMPEG_MAP = {
     "H.264 (AVC)": "libx264",
@@ -301,6 +308,113 @@ class VideoDownloader:
 
         return self._run_download(url, opts, f"audio ({audio_format})")
 
+    def convert_video_file(
+        self,
+        input_path: str,
+        output_dir: str | None = None,
+        target_resolution: str = "1080p",
+        codec: str = "Auto",
+        container: str = "mp4",
+        keep_source: bool = True,
+    ) -> str:
+        """
+        Convert a local video file to another resolution/container.
+
+        Returns the path to the converted file.
+        Raises DownloadError on failure.
+        """
+        if not HAS_FFMPEG:
+            raise DownloadError(
+                "ffmpeg is required for video conversion but was not found.\n"
+                "Install it: winget install --id Gyan.FFmpeg -e"
+            )
+
+        src = Path(input_path).expanduser()
+        if not src.is_file():
+            raise DownloadError(f"Input file not found: {input_path}")
+
+        if target_resolution not in CONVERSION_RESOLUTION_MAP:
+            raise DownloadError(
+                f"Unsupported target resolution '{target_resolution}'."
+            )
+        if codec not in CODEC_OPTIONS:
+            raise DownloadError(f"Unsupported codec '{codec}'.")
+        if container not in CONTAINER_OPTIONS:
+            raise DownloadError(f"Unsupported container '{container}'.")
+
+        out_dir = Path(output_dir).expanduser() if output_dir else src.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        target_height = CONVERSION_RESOLUTION_MAP[target_resolution]
+        target_ext = src.suffix if container == "Original" else f".{container}"
+        dst = out_dir / f"{src.stem} [{target_resolution}]{target_ext}"
+
+        ffmpeg_codec = CODEC_FFMPEG_MAP.get(codec, "libx264")
+        if codec == "Auto":
+            ffmpeg_codec = "libx264"
+
+        audio_codec = "aac" if target_ext.lower() == ".mp4" else "libopus"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-vf",
+            f"scale=-2:{target_height}:flags=lanczos",
+            "-c:v",
+            ffmpeg_codec,
+            "-c:a",
+            audio_codec,
+        ]
+
+        if target_ext.lower() == ".mp4":
+            cmd.extend([
+                "-movflags", "+faststart",
+                "-pix_fmt", "yuv420p",
+                "-profile:v", "high",
+                "-level", "4.1",
+                "-c:a", "aac",
+                "-b:a", "160k",
+                "-ac", "2",
+                "-ar", "44100",
+                "-tag:v", "avc1",
+            ])
+
+        cmd.append(str(dst))
+
+        self._log(
+            f"🎬 Converting {src.name} -> {target_resolution} ({container}) ..."
+        )
+        try:
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            err = (exc.stderr or exc.stdout or str(exc)).strip()
+            raise DownloadError(f"Conversion failed: {err}") from exc
+
+        try:
+            converted_path = str(dst.resolve())
+        except Exception:
+            converted_path = str(dst)
+
+        if not keep_source:
+            try:
+                src.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        self._log(f"✅  Converted → {converted_path}")
+        return converted_path
+
     def batch_download(
         self,
         urls: list[str],
@@ -377,6 +491,8 @@ class VideoDownloader:
                 # Determine the filepath yt-dlp actually wrote
                 filepath = info.get("requested_downloads", [{}])[0].get("filepath") \
                            or ydl.prepare_filename(info)
+                # Normalize to an absolute path so callers always get a stable location
+                filepath = os.path.abspath(filepath)
         except yt_dlp.utils.DownloadError as exc:
             raise DownloadError(self._friendly_error(str(exc))) from exc
         except DownloadError:
@@ -489,8 +605,13 @@ class VideoDownloader:
         except Exception:
             pass
 
-        self._log(f"✅  Exported → {dst}")
-        return str(dst)
+        # Return absolute resolved path for the exported file
+        try:
+            exported_path = str(dst.resolve())
+        except Exception:
+            exported_path = str(dst)
+        self._log(f"✅  Exported → {exported_path}")
+        return exported_path
 
     @staticmethod
     def _collect_available_heights(formats: list[dict]) -> set[int]:

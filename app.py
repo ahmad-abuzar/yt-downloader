@@ -27,6 +27,7 @@ from downloader import (
     CODEC_OPTIONS,
     FRAME_RATE_OPTIONS,
     CONTAINER_OPTIONS,
+    CONVERSION_RESOLUTION_OPTIONS,
     PRESET_CONFIGS,
     HAS_FFMPEG,
 )
@@ -60,11 +61,12 @@ class App(ctk.CTk):
         # ── Window setup ─────────────────────────────────────────────────
         self.title("⬇  YouTube Video Downloader")
         self.geometry(f"{self.WIDTH}x{self.HEIGHT}")
-        self.minsize(780, 620)
+        self.minsize(640, 540)
         self.configure(fg_color=BG_DARK)
 
         self._download_thread: threading.Thread | None = None
         self._downloader: VideoDownloader | None = None
+        self._operation_active = False
         self.quality_options = list(QUALITY_MAP.keys())
         if not HAS_FFMPEG:
             self.quality_options = [
@@ -79,15 +81,22 @@ class App(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        # Main container with padding
-        self.main = ctk.CTkFrame(self, fg_color=BG_DARK)
-        self.main.pack(fill="both", expand=True, padx=20, pady=20)
+        # Scrollable main container so the full app stays reachable on small screens
+        self.main = ctk.CTkScrollableFrame(
+            self,
+            fg_color=BG_DARK,
+            corner_radius=0,
+            scrollbar_button_color=ACCENT,
+            scrollbar_button_hover_color=ACCENT_HOVER,
+        )
+        self.main.pack(fill="both", expand=True, padx=12, pady=12)
 
         self._build_header()
         self._build_url_section()
         self._build_options_section()
         self._build_output_section()
         self._build_action_buttons()
+        self._build_converter_section()
         self._build_progress_section()
         self._build_log_section()
 
@@ -301,6 +310,137 @@ class App(ctk.CTk):
             command=self._browse_folder,
         ).pack(side="right")
 
+    # ── Converter ───────────────────────────────────────────────────────
+    def _build_converter_section(self):
+        card = self._card(self.main)
+
+        ctk.CTkLabel(
+            card,
+            text="🎬  Video Converter  –  convert a local video to 720p / 1080p / 4K",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(0, 8))
+
+        file_row = ctk.CTkFrame(card, fg_color="transparent")
+        file_row.pack(fill="x", pady=(0, 8))
+
+        self.convert_source_var = ctk.StringVar(value="")
+        self.convert_source_entry = ctk.CTkEntry(
+            file_row,
+            textvariable=self.convert_source_var,
+            font=ctk.CTkFont(size=13),
+            fg_color="#12121f",
+            border_color=BORDER,
+            border_width=1,
+            corner_radius=8,
+            text_color=TEXT_PRIMARY,
+        )
+        self.convert_source_entry.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkButton(
+            file_row,
+            text="Browse File",
+            width=110,
+            fg_color="#1e3a5f",
+            hover_color="#264d73",
+            corner_radius=8,
+            command=self._browse_convert_source,
+        ).pack(side="left", padx=(8, 0))
+
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x")
+
+        left = ctk.CTkFrame(row, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkLabel(
+            left,
+            text="Target Resolution",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.convert_resolution_var = ctk.StringVar(value="1080p")
+        self.convert_resolution_menu = ctk.CTkOptionMenu(
+            left,
+            variable=self.convert_resolution_var,
+            values=list(CONVERSION_RESOLUTION_OPTIONS),
+            width=200,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.convert_resolution_menu.pack(anchor="w")
+
+        self.convert_keep_source_var = ctk.BooleanVar(value=True)
+        self.convert_keep_source_check = ctk.CTkCheckBox(
+            left,
+            text="Keep source file",
+            variable=self.convert_keep_source_var,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            corner_radius=6,
+        )
+        self.convert_keep_source_check.pack(anchor="w", pady=(10, 0))
+
+        right = ctk.CTkFrame(row, fg_color="transparent")
+        right.pack(side="right", padx=(20, 0))
+
+        ctk.CTkLabel(
+            right,
+            text="Container",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.convert_container_var = ctk.StringVar(value="mp4")
+        self.convert_container_menu = ctk.CTkOptionMenu(
+            right,
+            variable=self.convert_container_var,
+            values=list(CONTAINER_OPTIONS),
+            width=170,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.convert_container_menu.pack(anchor="w")
+
+        ctk.CTkLabel(
+            right,
+            text="Codec",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(8, 4))
+
+        self.convert_codec_var = ctk.StringVar(value="Auto")
+        self.convert_codec_menu = ctk.CTkOptionMenu(
+            right,
+            variable=self.convert_codec_var,
+            values=list(CODEC_OPTIONS),
+            width=170,
+            fg_color="#12121f",
+            button_color=ACCENT,
+            button_hover_color=ACCENT_HOVER,
+            corner_radius=8,
+        )
+        self.convert_codec_menu.pack(anchor="w")
+
+        self.convert_btn = ctk.CTkButton(
+            card,
+            text="🔄  Convert Video",
+            width=180,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            corner_radius=10,
+            command=self._on_convert,
+        )
+        self.convert_btn.pack(anchor="e", pady=(10, 0))
+
     # ── Action buttons ───────────────────────────────────────────────────
     def _build_action_buttons(self):
         row = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -375,12 +515,29 @@ class App(ctk.CTk):
             text_color=TEXT_SECONDARY,
         ).pack(anchor="w", pady=(0, 4))
 
+        # Create a frame to hold the textbox and its vertical scrollbar
+        log_frame = ctk.CTkFrame(card, fg_color="transparent")
+        log_frame.pack(fill="both", expand=True)
+
         self.log_textbox = ctk.CTkTextbox(
-            card, font=ctk.CTkFont(family="Consolas", size=12),
+            log_frame, font=ctk.CTkFont(family="Consolas", size=12),
             fg_color="#0b0b14", corner_radius=8,
-            text_color="#c8c8d8", state="normal",
+            text_color="#c8c8d8", state="normal", wrap="none",
         )
-        self.log_textbox.pack(fill="both", expand=True)
+        self.log_textbox.pack(side="left", fill="both", expand=True)
+
+        # Vertical scrollbar for the log area
+        self.log_scrollbar = ctk.CTkScrollbar(log_frame, orientation="vertical")
+        self.log_scrollbar.pack(side="right", fill="y")
+
+        # Wire the scrollbar and textbox together
+        try:
+            self.log_textbox.configure(yscrollcommand=self.log_scrollbar.set)
+            self.log_scrollbar.configure(command=self.log_textbox.yview)
+        except Exception:
+            # Fallback: some CTk versions wrap differently; ignore if not supported
+            pass
+
         self.log_textbox.configure(state="disabled")
 
     def _log_ffmpeg_hint(self):
@@ -446,6 +603,9 @@ class App(ctk.CTk):
             self._log("⚠  Output folder does not exist yet.")
 
     def _on_fetch_info(self):
+        if self._operation_active:
+            self._log("⚠  Please wait for the current task to finish.")
+            return
         urls = self._get_urls()
         if not urls:
             self._log("⚠  Please paste at least one YouTube URL.")
@@ -454,26 +614,33 @@ class App(ctk.CTk):
         threading.Thread(target=self._fetch_info_worker, args=(urls,), daemon=True).start()
 
     def _fetch_info_worker(self, urls: list[str]):
-        dl = VideoDownloader(output_dir=self.output_var.get())
-        for url in urls:
-            try:
-                info = dl.get_video_info(url)
-                dur = str(timedelta(seconds=info["duration"])) if info["duration"] else "N/A"
-                views = f'{info["view_count"]:,}' if info["view_count"] else "N/A"
-                qualities = ", ".join(info["available_qualities"])
-                self._log(
-                    f"────────────────────────────────\n"
-                    f"📹  {info['title']}\n"
-                    f"   👤 {info['uploader']}   ⏱ {dur}   👀 {views}\n"
-                    f"   Available: {qualities}\n"
-                )
-            except DownloadError as exc:
-                self._log(f"{exc}")
-            except Exception as exc:
-                self._log(f"❌ Error: {exc}")
-        self.after(0, lambda: self._set_busy(False))
+        try:
+            dl = VideoDownloader(output_dir=self.output_var.get())
+            for url in urls:
+                try:
+                    info = dl.get_video_info(url)
+                    dur = str(timedelta(seconds=info["duration"])) if info["duration"] else "N/A"
+                    views = f'{info["view_count"]:,}' if info["view_count"] else "N/A"
+                    qualities = ", ".join(info["available_qualities"])
+                    self._log(
+                        f"────────────────────────────────\n"
+                        f"📹  {info['title']}\n"
+                        f"   👤 {info['uploader']}   ⏱ {dur}   👀 {views}\n"
+                        f"   Available: {qualities}\n"
+                    )
+                except DownloadError as exc:
+                    self._log(f"{exc}")
+                except Exception as exc:
+                    self._log(f"❌ Error: {exc}")
+        except Exception as exc:
+            self._log(f"❌ Error: {exc}")
+        finally:
+            self.after(0, lambda: self._set_busy(False))
 
     def _on_download(self):
+        if self._operation_active:
+            self._log("⚠  Please wait for the current task to finish.")
+            return
         urls = self._get_urls()
         if not urls:
             self._log("⚠  Please paste at least one YouTube URL.")
@@ -484,43 +651,89 @@ class App(ctk.CTk):
         )
         self._download_thread.start()
 
+    def _browse_convert_source(self):
+        file_path = ctk.filedialog.askopenfilename(
+            title="Select a video file to convert",
+            filetypes=[
+                ("Video files", "*.mp4 *.mkv *.webm *.mov *.avi *.m4v *.flv"),
+                ("All files", "*.*"),
+            ],
+        )
+        if file_path:
+            self.convert_source_var.set(file_path)
+
+    def _on_convert(self):
+        if self._operation_active:
+            self._log("⚠  Please wait for the current task to finish.")
+            return
+
+        source = self.convert_source_var.get().strip()
+        if not source:
+            self._log("⚠  Please choose a video file to convert.")
+            return
+
+        self._set_busy(True, label="Converting …")
+        threading.Thread(target=self._convert_worker, daemon=True).start()
+
+    def _convert_worker(self):
+        try:
+            converter = VideoDownloader(output_dir=self.output_var.get(), log_callback=self._log)
+            result = converter.convert_video_file(
+                self.convert_source_var.get().strip(),
+                output_dir=self.output_var.get(),
+                target_resolution=self.convert_resolution_var.get(),
+                codec=self.convert_codec_var.get(),
+                container=self.convert_container_var.get(),
+                keep_source=self.convert_keep_source_var.get(),
+            )
+            self._log(f"✅  Converted file saved at: {result}")
+        except DownloadError as exc:
+            self._log(str(exc))
+        except Exception as exc:
+            self._log(f"❌ Error: {exc}")
+        finally:
+            self.after(0, lambda: self._set_busy(False))
+
     def _download_worker(self, urls: list[str]):
-        self._downloader = VideoDownloader(
-            output_dir=self.output_var.get(),
-            progress_callback=self._on_progress,
-            log_callback=self._log,
-        )
+        try:
+            self._downloader = VideoDownloader(
+                output_dir=self.output_var.get(),
+                progress_callback=self._on_progress,
+                log_callback=self._log,
+            )
 
-        audio_only = self.audio_only_var.get()
-        audio_fmt  = self.audio_format_var.get()
-        quality    = self.quality_var.get()
-        codec      = self.codec_var.get()
-        frame_rate = self.frame_rate_var.get()
-        container  = self.container_var.get()
-        preset     = self.preset_var.get()
-        preset_name = None if preset == "Custom (Manual)" else preset
+            audio_only = self.audio_only_var.get()
+            audio_fmt  = self.audio_format_var.get()
+            quality    = self.quality_var.get()
+            codec      = self.codec_var.get()
+            frame_rate = self.frame_rate_var.get()
+            container  = self.container_var.get()
+            preset     = self.preset_var.get()
+            preset_name = None if preset == "Custom (Manual)" else preset
 
-        results = self._downloader.batch_download(
-            urls,
-            quality=quality,
-            audio_only=audio_only,
-            audio_format=audio_fmt,
-            codec=codec,
-            frame_rate=frame_rate,
-            container=container,
-            preset_name=preset_name,
-        )
+            results = self._downloader.batch_download(
+                urls,
+                quality=quality,
+                audio_only=audio_only,
+                audio_format=audio_fmt,
+                codec=codec,
+                frame_rate=frame_rate,
+                container=container,
+                preset_name=preset_name,
+            )
 
-        # Summary
-        ok = sum(1 for r in results if r["success"])
-        fail = len(results) - ok
-        self._log(
-            f"\n═══════════════════════════════\n"
-            f"  ✅ {ok} succeeded   ❌ {fail} failed\n"
-            f"═══════════════════════════════"
-        )
-
-        self.after(0, lambda: self._set_busy(False))
+            # Summary
+            ok = sum(1 for r in results if r["success"])
+            fail = len(results) - ok
+            self._log(
+                f"\n═══════════════════════════════\n"
+                f"  ✅ {ok} succeeded   ❌ {fail} failed\n"
+                f"═══════════════════════════════"
+            )
+        except Exception as exc:
+            self._log(f"❌ Error: {exc}")
+        finally:
+            self.after(0, lambda: self._set_busy(False))
 
     def _on_cancel(self):
         if self._downloader:
@@ -544,19 +757,29 @@ class App(ctk.CTk):
 
     def _get_urls(self) -> list[str]:
         raw = self.url_textbox.get("1.0", "end").strip()
-        return [u.strip() for u in raw.splitlines() if u.strip()]
+        urls: list[str] = []
+        seen: set[str] = set()
+        for url in (u.strip() for u in raw.splitlines()):
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+        return urls
 
     def _set_busy(self, busy: bool, label: str = "Ready"):
+        self._operation_active = busy
         if busy:
             self.download_btn.configure(state="disabled")
             self.fetch_btn.configure(state="disabled")
             self.cancel_btn.configure(state="normal")
+            self.convert_btn.configure(state="disabled")
             self.progress_bar.set(0)
             self.progress_label.configure(text=label)
         else:
             self.download_btn.configure(state="normal")
             self.fetch_btn.configure(state="normal")
             self.cancel_btn.configure(state="disabled")
+            self.convert_btn.configure(state="normal")
             self.progress_label.configure(text="Ready")
             self.speed_label.configure(text="")
 
@@ -574,9 +797,15 @@ class App(ctk.CTk):
         self.after(0, self._append_log, message)
 
     def _append_log(self, message: str):
+        # Normalize trailing newlines so logs aren't double-spaced
+        text = message.rstrip("\n")
         self.log_textbox.configure(state="normal")
-        self.log_textbox.insert("end", message + "\n")
-        self.log_textbox.see("end")
+        self.log_textbox.insert("end", text + "\n")
+        # Ensure the scrollbar moves with new content if available
+        try:
+            self.log_textbox.see("end")
+        except Exception:
+            pass
         self.log_textbox.configure(state="disabled")
 
 
